@@ -11,9 +11,11 @@ pico_sdk_init()
 add_executable(sonosupport
     main.c
     HAL/src/emg.c
+    control/src/emg_cal.c
 )
 target_include_directories(sonosupport PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/HAL/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/control/include
 )
 
 target_link_libraries(sonosupport

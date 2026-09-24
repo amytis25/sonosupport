@@ -28,20 +28,18 @@ Every reading is then expressed as **%MVC**, so results are comparable across pe
 
 **Safety:** while electrodes are on a person, run your laptop on battery power (or use a USB isolator) so there is no mains-connected path through the body.
 
-## One-time setup: flash MicroPython
+## One-time setup: build and flash the firmware
 
-You don't drag your `.py` onto the Pico. You drag over the **MicroPython firmware**, then send the script separately.
+Calibration runs in the C firmware (`control/src/emg_cal.c`, called from `main.c`). The Pico has no filesystem, so it streams its data over USB and `emg_capture.py` on your laptop saves the CSV files.
 
-1. Download the Pico 2 W `.uf2` from micropython.org/download/RPI_PICO2_W.
+1. From `firmware/`, run `build.bat` (needs `PICO_SDK_PATH` set). It produces `build\sonosupport.uf2`.
 2. Hold **BOOTSEL** while plugging in the USB cable. A drive called `RP2350` appears.
-3. Drag the `.uf2` onto that drive. The Pico reboots by itself.
+3. Drag `sonosupport.uf2` onto that drive. The Pico reboots by itself.
 
-This replaces any C++ `.uf2` on the board, so re-flash that later for your other code.
-
-Install the terminal tool on your laptop (Windows PowerShell, not WSL, since USB serial doesn't show up in WSL by default):
+Install pyserial on your laptop (Windows PowerShell, not WSL, since USB serial doesn't show up in WSL by default):
 
 ```powershell
-pip install mpremote
+python -m pip install pyserial
 ```
 
 ## Step-by-step
@@ -57,17 +55,16 @@ pip install mpremote
 - Do a hard squeeze and adjust so the peak reaches roughly **2.0 to 3.0 V** without hitting the 3.3V rail.
 - If it hits the rail (saturates), you lose information. The script warns you about this.
 
-### 3. Run the script
-Open PowerShell in the folder that contains `myoware_calibrate.py`:
+### 3. Start the capture script
+Open PowerShell in `firmware/calibration` (the CSV files are saved in the folder you run it from):
 
 ```powershell
-mpremote run myoware_calibrate.py
+python emg_capture.py
 ```
 
-- The prompts print in the terminal. Follow them.
-- If it says "no device", run `mpremote connect list` to find the port, then `mpremote connect COM5 run myoware_calibrate.py` (use your port).
-- Prefer no terminal? Open the file in Thonny, choose **MicroPython (Raspberry Pi Pico)** as the interpreter, and press Run.
-- `mpremote run` doesn't copy the script to the Pico, so it only runs while your laptop is connected. To run it on every power-up, use `mpremote cp myoware_calibrate.py :main.py`. Only do that once you're happy with it, because it starts calibrating right away on boot.
+- It finds the Pico automatically. If not, run `python -m serial.tools.list_ports` and pass the port: `python emg_capture.py COM6`.
+- The Pico waits until the script connects, then asks you to **press Enter** to start calibrating.
+- Any serial monitor (PuTTY, VS Code Serial Monitor) also works for watching, but only `emg_capture.py` saves the files.
 
 ### 4. Baseline (5 seconds)
 - Relax the muscle completely and stay still.
@@ -85,24 +82,20 @@ mpremote run myoware_calibrate.py
 
 ### 7. Threshold and save
 - Active threshold = `baseline + 3 x noise std`.
-- Values are saved to `calibration.json` on the Pico.
+- Values are saved to `calibration.csv` on your laptop (one row per calibration). The Pico keeps them in RAM, so recalibrate after every power cycle.
 
 ### 8. Log a trial
-- The script asks for a **trial label**, for example `with_support` or `without_support`.
+- The Pico asks for a **trial label**, for example `with_support` or `without_support`. Type `c` instead to recalibrate.
 - It then logs 10 samples per second and prints live voltage, %MVC, and ACTIVE/rest state.
-- Press **Ctrl+C** to stop. It prints a summary: duration, mean %MVC, peak %MVC, and % of time active.
-- Data is written to the Pico as CSV files (flushed every second).
+- Type **q** and press Enter to stop. It prints a summary: duration, mean %MVC, peak %MVC, and % of time active, then asks for the next label.
+- Press **Ctrl+C** to quit `emg_capture.py` when you're done.
 
-### 9. Copy the data to your laptop
-```powershell
-mpremote cp :emg_log.csv .
-mpremote cp :emg_summary.csv .
-```
+### 9. The data files
 
 - `emg_log.csv` has every sample (`label, t_s, volts, pct_mvc, active`). It appends on each run, so all your trials end up in one file.
 - `emg_summary.csv` has one row per trial (mean %MVC, peak %MVC, % time active, plus the baseline and MVC used).
 - Both open directly in Excel.
-- To start fresh, delete the old files on the Pico: `mpremote rm :emg_log.csv :emg_summary.csv`.
+- To start fresh, delete or rename the CSV files on your laptop.
 
 ## Tips for validation
 
@@ -111,7 +104,7 @@ mpremote cp :emg_summary.csv .
 - Compare %MVC **with vs without** the arm support during the same simulated scanning task (use labels like `with_support` and `without_support`, then compare the rows in `emg_summary.csv`).
 - Keep the same electrode placement between trials. If you re-calibrate, do it before both trials you want to compare.
 
-## Settings you can tweak (top of the script)
+## Settings you can tweak (top of `control/src/emg_cal.c`, rebuild after changing)
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -123,5 +116,3 @@ mpremote cp :emg_summary.csv .
 | `MVC_REST_SECONDS` | 5 | Rest between contractions |
 | `THRESH_K` | 3 | Threshold multiplier on noise std |
 | `LOG_HZ` | 10 | Logged samples per second |
-| `LOG_FILE` | `emg_log.csv` | File for every sample |
-| `SUMMARY_FILE` | `emg_summary.csv` | File for one row per trial |
